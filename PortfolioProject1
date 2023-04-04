@@ -1,0 +1,122 @@
+-- SELECT *
+--     from CovidDeaths
+--     order by 3, 4
+
+-- SELECT *
+--     from CovidVaccinations
+--     order by 3, 4
+
+--shows likelihood of dying from covid in the US on a certain date between 2020 and April 2021
+SELECT location, date, total_cases, total_deaths, (total_deaths/total_cases)*100 as death_rate
+    from CovidDeaths
+    where location = 'United States'
+    order by 1, 2
+
+--death_rate was returning 0, so in trying to figure out why, I looked up  the data types of each column, and realized it was int 
+SELECT DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'CovidDeaths' AND COLUMN_NAME = 'total_cases';
+-- death_rate increased as time went on
+
+--I changed the data types of these columns from int to decimal so that death_rate wouldn't be returned as 0
+ALTER TABLE CovidDeaths
+ALTER COLUMN total_cases decimal;
+
+ALTER TABLE CovidDeaths
+ALTER COLUMN total_deaths decimal;
+
+--Looking at infection rate in US from 2020 - April 2021
+SELECT location, date, total_cases, population, (total_cases/population)*100 as infection_rate
+    from CovidDeaths
+    where location = 'United States'
+    order by 1, 2
+-- finding? infection rate increased as time went on almost upto 10%
+
+
+--looking at countries with highest infection rate compared to population
+SELECT location, population, max(total_cases) as highestCases, max((total_cases/population))*100 as infection_rate
+    from CovidDeaths
+    group by location, population
+    order by 4 desc
+--finding? Andorra is #1 with 17% infection rate but smaller population, US places at #9 with 9.77%
+
+--Looking at countries with highest death count 
+SELECT location, max(total_deaths) as TotalDeaths
+    from CovidDeaths
+    where continent is not null -- have to add this because some locations are the continent themselves, leaving the actual continent column null
+    group by location
+    order by 2 desc
+--finding? US has highest deathcount
+
+
+--finding total death count by continent
+SELECT location, max(total_deaths) as TotalDeaths
+    from CovidDeaths
+    where continent is null -- based on last query, we use this instead of selecting and grouping by continent column to get accurate #
+    group by location
+    order by 2 desc
+
+-- GLOBAL NUMBERS per day
+select date, sum(cast(new_cases as decimal)) as newcases, sum(cast(new_deaths as decimal)) as newdeaths, sum(cast(new_deaths as decimal))/sum(cast(new_cases as decimal))*100 as global_death_rate
+from CovidDeaths
+where continent is not null
+group by date   
+order by 1, 2
+
+--Global Totals
+select sum(new_cases) as new_cases, sum(new_deaths) as new_deaths, (sum(new_cases)/sum(new_deaths))*100 as global_death_rate
+from CovidDeaths
+where continent is not null  
+order by 1, 2
+
+
+--Working with the other table
+
+--using CTE to find vac_rate per day
+with POPvsVAC (continent, location, date, population, new_vaccinations, rollingtotalvac) as (
+select dea.continent, dea.location, dea.date, dea.population, cast(vac.new_vaccinations as decimal), sum(cast(vac.new_vaccinations as decimal)) over (partition by dea.location order by dea.location, dea.date) as rollingtotalvac
+from CovidDeaths dea join CovidVaccinations vac on dea.location = vac.location and dea.date = vac.date
+where dea.continent is not NULL
+
+)
+select *, (rollingtotalvac/population) *100 as vac_rate
+from POPvsVAC
+
+
+--using temp table to find rollingtotalvac as a % of population
+
+drop table if exists #PopVacd
+
+create table #PopVacd
+(continent nvarchar(255),
+location nvarchar(255),
+date datetime,
+population numeric,
+new_vaccinations numeric,
+rollingtotalvac numeric
+)
+
+insert into #PopVacd
+select dea.continent, dea.location, dea.date, dea.population, cast(vac.new_vaccinations as decimal), sum(cast(vac.new_vaccinations as decimal)) over (partition by dea.location order by dea.location, dea.date) as rollingtotalvac
+from CovidDeaths dea join CovidVaccinations vac on dea.location = vac.location and dea.date = vac.date
+where dea.continent is not NULL
+
+select *, (rollingtotalvac/population)*100 as newvac
+from #PopVacd
+
+
+--Creating Views for Visualization
+
+create view GlobalStats as 
+select date, sum(cast(new_cases as decimal)) as newcases, sum(cast(new_deaths as decimal)) as newdeaths, sum(cast(new_deaths as decimal))/sum(cast(new_cases as decimal))*100 as global_death_rate
+from CovidDeaths
+where continent is not null
+group by date   
+--order by 1, 2
+
+create view DeathsbyCountry as
+SELECT location, max(total_deaths) as TotalDeaths
+    from CovidDeaths
+    where continent is not null -- have to add this because some locations are the continent themselves, leaving the actual continent column null
+    group by location
+    -- order by 2 desc
